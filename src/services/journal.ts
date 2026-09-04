@@ -1,5 +1,6 @@
 import { FISH_ENVIRONMENT_WEIGHTS, type TimePeriod, type WeatherId } from "../data/environmentData";
 import {
+  AREA_REQUIREMENTS,
   biomeInsight,
   HABITAT_COMPLETE_REWARD,
   HABITAT_BIOMES,
@@ -10,6 +11,7 @@ import {
   PERIOD_INSIGHT,
   WEATHER_INSIGHT
 } from "../data/journalData";
+import type { AreaRequirement } from "../data/journalData";
 import type {
   HabitatBiome,
   HabitatCell,
@@ -166,6 +168,44 @@ export function claimHabitatReward(speciesName: string): HabitatClaimResult {
     claimedHabitatRewards: [...claimed, speciesName]
   });
   return { ok: true, message: "รับตราสัญลักษณ์นักสำรวจแล้ว", reward: HABITAT_COMPLETE_REWARD };
+}
+
+export type AreaLockState = {
+  locked: boolean;
+  /** มีค่าเมื่อถูกล็อกเท่านั้น ใช้บอกผู้เล่นว่าต้องทำอะไรต่อ */
+  hint?: string;
+  speciesLogged: number;
+  cardsComplete: number;
+};
+
+/** ชนิดที่มีบันทึกนิเวศแล้วอย่างน้อยหนึ่งช่อง ไม่นับชนิดที่แค่เคยเจอแต่ไม่มีช่อง */
+export function countLoggedSpecies(save: SaveData = readSaveData()): number {
+  return Object.keys(readSpeciesLog(save))
+    .filter(name => getHabitatProgress(name, save).found > 0).length;
+}
+
+export function countCompleteCards(save: SaveData = readSaveData()): number {
+  return Object.keys(readSpeciesLog(save))
+    .filter(name => getHabitatProgress(name, save).complete).length;
+}
+
+/**
+ * พื้นที่นี้เข้าได้หรือยัง
+ * `requirements` แยกออกมาเป็นพารามิเตอร์เพื่อให้เทสต์ลองเงื่อนไขได้ โดยไม่ต้องใส่ข้อมูลล็อกจริงลงเกม
+ */
+export function getAreaLockState(
+  areaId: string,
+  save: SaveData = readSaveData(),
+  requirements: Record<string, AreaRequirement> = AREA_REQUIREMENTS
+): AreaLockState {
+  const speciesLogged = countLoggedSpecies(save);
+  const cardsComplete = countCompleteCards(save);
+  const requirement = requirements[areaId];
+  if (!requirement) return { locked: false, speciesLogged, cardsComplete };
+  const shortOnSpecies = speciesLogged < (requirement.speciesLogged ?? 0);
+  const shortOnCards = cardsComplete < (requirement.cardsComplete ?? 0);
+  if (!shortOnSpecies && !shortOnCards) return { locked: false, speciesLogged, cardsComplete };
+  return { locked: true, hint: requirement.hint, speciesLogged, cardsComplete };
 }
 
 /**

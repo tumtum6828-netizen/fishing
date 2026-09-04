@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { COAST_NAVIGATION, moveOnNavigationMap } from "../data/worldNavigation";
 import { readSaveData } from "../services/save";
 import { getStarterQuestSummary, readStarterQuest } from "../services/quests";
-import { createDailyQuestButton, createEnergyPanel, createFishingActionButton, createHudDiscButton, createWorldMenu, createWorldTopBar, preloadWorldHudAssets, THAI_FONT } from "../ui/worldHud";
+import { createDailyQuestButton, createEnergyPanel, createFishingActionButton, createHudDiscButton, createWorldMenu, createWorldTopBar, preloadWorldHudAssets, showWorldNotice, THAI_FONT } from "../ui/worldHud";
 import { createWaterEffects } from "../ui/waterEffects";
 import { createMapBaitSelector } from "../ui/baitSelector";
 import { advanceWorldTime, formatWorldClock, getTimePeriod, readWorldState } from "../services/worldTime";
@@ -14,6 +14,7 @@ import type { AvatarPose } from "../types/avatar";
 import { RODS } from "../data/gameData";
 import { getEquippedRodIndex } from "../services/equipment";
 import { preloadRodArt } from "../data/rodArt";
+import { getAreaLockState } from "../services/journal";
 
 export class WorldScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Container;
@@ -94,6 +95,13 @@ export class WorldScene extends Phaser.Scene {
       this.player.x, this.player.y, this.riverSpot.x, this.riverSpot.y
     );
     if (!this.transitioning && riverDistance < 55) {
+      const lock = getAreaLockState("river");
+      if (lock.locked) {
+        this.transitioning = true;
+        showWorldNotice(this, lock.hint ?? "ยังไปพื้นที่นี้ไม่ได้");
+        this.time.delayedCall(900, () => { this.transitioning = false; });
+        return;
+      }
       this.transitioning = true;
       this.scene.start("RiverScene", { spawn: "village" });
       return;

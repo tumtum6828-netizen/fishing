@@ -234,6 +234,26 @@ export function resetQuestBoardDismissal(): void {
   questBoardDismissedWhileReady = false;
 }
 
+/**
+ * ข้อความแจ้งเตือนกลางจอแบบชั่วคราว ใช้ตอนทางถูกล็อก
+ * ถ้าไม่มีอะไรบอก ผู้เล่นจะเดินชนขอบแล้วไม่รู้ว่าทำไมไปต่อไม่ได้
+ */
+export function showWorldNotice(scene: Phaser.Scene, message: string): void {
+  const text = scene.add.text(640, 210, message, {
+    fontFamily: THAI_FONT, fontSize: "17px", fontStyle: "bold", color: "#fff6d5",
+    align: "center", wordWrap: { width: 520 }
+  }).setOrigin(.5).setDepth(30);
+  const back = scene.add.graphics().setDepth(29);
+  back.fillStyle(0x0c3c52, .92)
+    .fillRoundedRect(640 - text.width / 2 - 22, 210 - text.height / 2 - 14, text.width + 44, text.height + 28, 16);
+  back.lineStyle(1.6, 0xbfe4f2, .9)
+    .strokeRoundedRect(640 - text.width / 2 - 22, 210 - text.height / 2 - 14, text.width + 44, text.height + 28, 16);
+  scene.tweens.add({
+    targets: [text, back], alpha: 0, delay: 2200, duration: 420,
+    onComplete: () => { text.destroy(); back.destroy(); }
+  });
+}
+
 export function createDailyQuestButton(scene: Phaser.Scene, returnScene: string): Phaser.GameObjects.Container {
   const summary = getDailyQuestSummary();
   const save = readSaveData();

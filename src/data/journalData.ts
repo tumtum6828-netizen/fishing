@@ -23,6 +23,25 @@ export const INSIGHT_UNLOCK_FRACTIONS: Record<InsightKind, number> = {
   biome: .75
 };
 
+export type AreaRequirement = {
+  /** จำนวนชนิดที่ต้องมีบันทึกนิเวศอย่างน้อยหนึ่งช่อง */
+  speciesLogged?: number;
+  /** จำนวนการ์ดที่ต้องเก็บครบทุกช่อง */
+  cardsComplete?: number;
+  /** บอกผู้เล่นว่าต้องทำอะไรถึงจะผ่าน เขียนให้เด็กอ่านแล้วรู้ว่าไปทำอะไรต่อ */
+  hint: string;
+};
+
+/**
+ * เงื่อนไขปลดล็อกพื้นที่ ตอนนี้**ตั้งใจให้ว่าง** จึงไม่มีพื้นที่ใดถูกล็อก
+ *
+ * เกมมีสองแผนที่ที่เดินถึงกันได้อยู่แล้ว การใส่เงื่อนไขย้อนหลังจะกั้นทางที่ผู้เล่นเดิมเคยเดินได้
+ * ระบบตรวจต่อไว้พร้อมแล้ว ให้ใส่เงื่อนไขจริงตอนเพิ่มแผนที่ใหม่ ซึ่งยังไม่มีใครเคยเข้าถึง
+ * ตัวอย่างเมื่อถึงเวลานั้น:
+ *   "mangrove": { speciesLogged: 4, hint: "บันทึกนิเวศให้ครบ 4 ชนิดก่อนออกไปป่าชายเลน" }
+ */
+export const AREA_REQUIREMENTS: Record<string, AreaRequirement> = {};
+
 export const HABITAT_COMPLETE_REWARD = {
   coins: 120,
   conservationPoints: 15,
