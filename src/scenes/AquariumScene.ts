@@ -20,9 +20,15 @@ import { readSaveData } from "../services/save";
 import { getBreedingRemainingMinutes, readBreeding } from "../services/breeding";
 import type { AquariumResident } from "../types/aquarium";
 import { addPillHitArea, addRoundedPanel, drawSoftBackdrop, GAME_THEME } from "../ui/gameTheme";
+import { pageSlice } from "../ui/paging";
 import { THAI_FONT } from "../ui/worldHud";
 
 type AquariumTab = "fish" | "decor";
+
+// แผงขวาสูงถึง y=631 การ์ดสูง 68 ระยะแถว 82 เริ่มที่ 262 จึงวางได้ 4 ใบต่อหน้า
+// เกมมีสัตว์น้ำที่ลงตู้ได้ 7 ชนิด และตู้จุได้ถึง 6 ตัว ถ้าวาดแค่ 4 ใบแรกโดยไม่มีการเปลี่ยนหน้า
+// ชนิดที่เหลือจะไม่มีทางใส่ลงตู้ได้เลย
+const PICKER_PER_PAGE = 4;
 
 const FISH_COLORS: Record<string, { body: number; fin: number }> = {
   "ปลากระบอก": { body: 0xa9c9bc, fin: 0x70968c },
@@ -33,6 +39,7 @@ const FISH_COLORS: Record<string, { body: number; fin: number }> = {
 export class AquariumScene extends Phaser.Scene {
   private returnScene = "WorldScene";
   private tab: AquariumTab = "fish";
+  private fishPage = 0;
   private notice = "แตะสัตว์น้ำในตู้ เพื่อนำกลับเข้ากระเป๋า";
 
   constructor() { super("AquariumScene"); }
@@ -43,9 +50,10 @@ export class AquariumScene extends Phaser.Scene {
     });
   }
 
-  init(data?: { returnScene?: string; tab?: AquariumTab; notice?: string }): void {
+  init(data?: { returnScene?: string; tab?: AquariumTab; fishPage?: number; notice?: string }): void {
     this.returnScene = data?.returnScene ?? "WorldScene";
     this.tab = data?.tab ?? "fish";
+    this.fishPage = Math.max(0, Math.floor(data?.fishPage ?? 0));
     this.notice = data?.notice ?? "แตะสัตว์น้ำในตู้ เพื่อนำกลับเข้ากระเป๋า";
   }
 
@@ -419,19 +427,21 @@ export class AquariumScene extends Phaser.Scene {
     }).setOrigin(.5);
     addPillHitArea(this, x, y, width, 48, () => {
       if (this.tab === tab) return;
-      this.scene.restart({ returnScene: this.returnScene, tab, notice: this.notice });
+      this.scene.restart({ returnScene: this.returnScene, tab, fishPage: this.fishPage, notice: this.notice });
     });
   }
 
   private drawFishPicker(residents: AquariumResident[], capacity: number): void {
     const inventory = readInventory();
     const residentNames = new Set(residents.map(resident => resident.name));
-    const availableNames = [...new Set([...Object.keys(inventory.fish), ...residentNames])];
-    const fishEntries = availableNames.filter(name => {
-      const profile = FISH_PROFILES.find(fish => fish.name === name);
-      const stack = inventory.fish[name];
-      return (residentNames.has(name) || (stack?.count ?? 0) > 0) && Boolean(profile) && name !== LEGENDARY_FISH.name;
-    });
+    const availableNames = new Set([...Object.keys(inventory.fish), ...residentNames]);
+    // เรียงตามลำดับชนิดในเกม ไม่ใช่ตามลำดับที่ปรากฏในกระเป๋า
+    // ไม่งั้นการ์ดจะย้ายที่ทุกครั้งที่ย้ายปลาเข้าออกตู้ และอาจกระโดดข้ามหน้า
+    const fishEntries = FISH_PROFILES
+      .filter(profile => profile.name !== LEGENDARY_FISH.name)
+      .map(profile => profile.name)
+      .filter(name => availableNames.has(name)
+        && (residentNames.has(name) || (inventory.fish[name]?.count ?? 0) > 0));
     this.add.text(920, 215, `สัตว์น้ำในกระเป๋า  •  ว่าง ${Math.max(0, capacity - residents.length)}`, {
       fontFamily: THAI_FONT, fontSize: "17px", fontStyle: "bold", color: GAME_THEME.ink
     });
@@ -441,7 +451,14 @@ export class AquariumScene extends Phaser.Scene {
       }).setOrigin(.5);
       return;
     }
-    fishEntries.slice(0, 4).forEach((name, index) => {
+    const view = pageSlice(fishEntries, this.fishPage, PICKER_PER_PAGE);
+    this.fishPage = view.page;
+    if (view.pageCount > 1) {
+      this.add.text(1180, 218, `หน้า ${view.page + 1}/${view.pageCount}`, {
+        fontFamily: THAI_FONT, fontSize: "13px", color: GAME_THEME.muted
+      }).setOrigin(1, 0);
+    }
+    view.items.forEach((name, index) => {
       const stack = inventory.fish[name];
       const y = 262 + index * 82;
       const aquariumResident = residents.find(resident => resident.name === name);
@@ -470,6 +487,26 @@ export class AquariumScene extends Phaser.Scene {
       if (enabled) addPillHitArea(this, 1114, y + 15, 60, 38, () => {
         const result = placeFishInAquarium(name);
         this.restartWithNotice(result.message);
+      });
+    });
+    if (view.pageCount > 1) this.drawPickerPager(view.page, view.pageCount);
+  }
+
+  private drawPickerPager(page: number, pageCount: number): void {
+    ([["‹ ก่อนหน้า", -1], ["ถัดไป ›", 1]] as const).forEach(([label, step], index) => {
+      const target = page + step;
+      const enabled = target >= 0 && target < pageCount;
+      const x = 910 + index * 146;
+      addRoundedPanel(this, x, 588, 134, 40, enabled ? 0xffffff : 0xefeade, GAME_THEME.line, 15, 1, 1.25);
+      this.add.text(x + 67, 608, label, {
+        fontFamily: THAI_FONT, fontSize: "13px", fontStyle: "bold",
+        color: enabled ? GAME_THEME.ink : GAME_THEME.muted
+      }).setOrigin(.5);
+      if (!enabled) return;
+      addPillHitArea(this, x, 588, 134, 40, () => {
+        this.scene.restart({
+          returnScene: this.returnScene, tab: this.tab, fishPage: target, notice: this.notice
+        });
       });
     });
   }
@@ -513,6 +550,6 @@ export class AquariumScene extends Phaser.Scene {
   }
 
   private restartWithNotice(notice: string, tab = this.tab): void {
-    this.scene.restart({ returnScene: this.returnScene, tab, notice });
+    this.scene.restart({ returnScene: this.returnScene, tab, fishPage: this.fishPage, notice });
   }
 }

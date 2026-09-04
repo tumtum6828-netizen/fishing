@@ -34,7 +34,10 @@ export function readAquarium(save: SaveData = readSaveData()): AquariumData {
   const knownDecorations = new Set<string>(AQUARIUM_DECORATIONS.map(decoration => decoration.id));
   const seenSpecies = new Set<string>();
   const residents: AquariumResident[] = [];
-  for (const resident of save.aquarium?.residents ?? []) {
+  // เซฟที่เสียอาจให้ค่าที่วนลูปไม่ได้ ถ้าปล่อยให้ throw ฉากตู้ปลาและสนามประลองจะเปิดไม่ขึ้นทั้งฉาก
+  const storedResidents = Array.isArray(save.aquarium?.residents) ? save.aquarium.residents : [];
+  const storedDecorations = Array.isArray(save.aquarium?.decorationIds) ? save.aquarium.decorationIds : [];
+  for (const resident of storedResidents) {
     if (!resident || typeof resident.name !== "string" || seenSpecies.has(resident.name)) continue;
     const profile = FISH_PROFILES.find(fish => fish.name === resident.name);
     if (!profile || resident.name === LEGENDARY_FISH.name) continue;
@@ -55,8 +58,7 @@ export function readAquarium(save: SaveData = readSaveData()): AquariumData {
   const fedAt = Number(save.aquarium?.fedAtWorldMinute);
   return {
     residents,
-    decorationIds: [...new Set(save.aquarium?.decorationIds ?? [])]
-      .filter(id => knownDecorations.has(id)),
+    decorationIds: [...new Set(storedDecorations)].filter(id => knownDecorations.has(id)),
     cleanedAtWorldMinute: normalizedCleanedAt,
     fedAtWorldMinute: Number.isFinite(fedAt)
       ? Math.min(currentMinute, Math.max(0, fedAt))
