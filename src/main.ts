@@ -38,6 +38,7 @@ import { createWeatherOverlay } from "./ui/weatherEffects";
 import { FISH_ART, getFishArt } from "./data/fishArt";
 import { seedPrototypeTestData } from "./services/testData";
 import { migrateSpeciesLog, recordCatch } from "./services/journal";
+import type { HabitatCell } from "./types/journal";
 import { preloadRodArt, ROD_FIRST_PERSON_ART } from "./data/rodArt";
 
 type BattleState = "ready" | "casting" | "waiting" | "hooking" | "fighting" | "caught" | "escaped";
@@ -278,6 +279,15 @@ class FishingScene extends Phaser.Scene {
   private luckBonus = 0;
   private pendingWeight = 0;
   private pendingXp = 0;
+  // สแนปช็อตของผลที่กำลังแสดงอยู่ ต้องไม่อ่าน state สดตอนกดปุ่ม
+  // เพราะรอบใหม่เริ่มได้ระหว่างที่หน้าผลยังค้างอยู่ แล้วจะให้รางวัลผิดตัว
+  private resultTimer?: Phaser.Time.TimerEvent;
+  private pendingIsTrash = false;
+  private pendingTrashName = "กระป๋องเก่า";
+  private pendingSpecies = FISH_PROFILES[0].name;
+  private pendingSaleValue = 0;
+  private pendingReleasePoints = 1;
+  private pendingCell: HabitatCell = { biome: "coast", period: "morning", weather: "clear" };
   private worldState: WorldState = { day: 1, minutes: 480, weather: "clear" };
   private environmentVisualKey = "";
 
@@ -849,6 +859,8 @@ class FishingScene extends Phaser.Scene {
     if (this.baitPicker) return;
     if (this.potionPicker) return;
     if (this.state === "caught" && this.resultPanel.visible) return;
+    // จับได้แล้วแต่หน้าผลยังไม่ขึ้น: การกดต่อต้องไม่ล้มรอบนี้ทิ้ง ไม่งั้นรางวัลจะไปตกที่รอบถัดไป
+    if (this.state === "caught" && this.resultTimer) return;
     if (this.state === "caught" || this.state === "escaped") this.resetBattle();
     if (this.state === "hooking") {
       this.commitHook();
@@ -951,8 +963,10 @@ class FishingScene extends Phaser.Scene {
   private clearFishingTimers(): void {
     this.biteTimer?.remove(false);
     this.hookTimer?.remove(false);
+    this.resultTimer?.remove(false);
     this.biteTimer = undefined;
     this.hookTimer = undefined;
+    this.resultTimer = undefined;
   }
 
   private resetBattle(): void {
@@ -1168,7 +1182,10 @@ class FishingScene extends Phaser.Scene {
     this.reelSubtitle.setText("แตะเพื่อเริ่ม");
     this.phaseText.setVisible(false);
     if (caught) {
-      this.time.delayedCall(620, () => this.showCatchResult());
+      this.resultTimer = this.time.delayedCall(620, () => {
+        this.resultTimer = undefined;
+        this.showCatchResult();
+      });
     }
   }
 
@@ -1202,6 +1219,15 @@ class FishingScene extends Phaser.Scene {
     this.resultFact.setText(`เรื่องน่ารู้: ${info.fact}`);
     this.discoveredSpecies.add(this.fishProfile.name);
     this.pendingWeight = weight;
+    this.pendingIsTrash = false;
+    this.pendingSpecies = this.fishProfile.name;
+    this.pendingSaleValue = saleValue;
+    this.pendingReleasePoints = releasePoints;
+    this.pendingCell = {
+      biome: this.biome,
+      period: getTimePeriod(this.worldState.minutes),
+      weather: this.worldState.weather
+    };
     this.setResultActions(false);
     this.keepButtonText.setText("เก็บไว้");
     this.sellButtonText.setText(`ขาย +${saleValue}`);
@@ -1213,6 +1239,8 @@ class FishingScene extends Phaser.Scene {
 
   private showTrashResult(): void {
     this.pendingXp = 6;
+    this.pendingIsTrash = true;
+    this.pendingTrashName = this.caughtTrashName;
     this.resultTitle.setText(this.caughtTrashName);
     this.resultRarity.setText("♻ วัสดุเก็บกู้จากแหล่งน้ำ");
     this.resultDetails.setText("คะแนนอนุรักษ์ +1   •   EXP +6");
@@ -1237,32 +1265,26 @@ class FishingScene extends Phaser.Scene {
   private resolveCatch(action: "keep" | "sell" | "release"): void {
     if (!this.resultPanel.visible) return;
     const previousLevel = getAnglerLevel(this.anglerXp, this.collectionCount);
-    const rarityMultiplier = this.isLegendary ? 8 : this.castGrade === "excellent" ? 3 : this.castGrade === "good" ? 1.6 : 1;
-    const saleValue = Math.max(1, Math.round(this.pendingWeight * 25 * rarityMultiplier));
-    if (this.hookedTrash) {
+    if (this.pendingIsTrash) {
       this.conservationPoints += 1;
-      addTrashToInventory(this.caughtTrashName);
+      addTrashToInventory(this.pendingTrashName);
     } else {
       this.collectionCount += 1;
       // จดลงสมุดภาคสนามทุกครั้งที่จับได้ ไม่ว่าจะเก็บ ขาย หรือปล่อย เพราะถือว่าผู้เล่นได้เห็นแล้ว
-      recordCatch(this.fishProfile.name, {
-        biome: this.biome,
-        period: getTimePeriod(this.worldState.minutes),
-        weather: this.worldState.weather
-      });
+      recordCatch(this.pendingSpecies, this.pendingCell);
       if (action === "keep") {
-        addFishToInventory(this.fishProfile.name, this.pendingWeight, saleValue, this.pendingSex);
+        addFishToInventory(this.pendingSpecies, this.pendingWeight, this.pendingSaleValue, this.pendingSex);
       } else if (action === "sell") {
-        this.coins += saleValue;
+        this.coins += this.pendingSaleValue;
       } else {
-        this.conservationPoints += this.isLegendary ? 5 : this.castGrade === "excellent" ? 3 : 1;
+        this.conservationPoints += this.pendingReleasePoints;
       }
     }
     this.anglerXp += this.pendingXp;
     this.updateResourceLabel();
     this.saveProgress();
-    recordStarterQuestCatch(this.hookedTrash ? "trash" : "fish");
-    recordDailyQuestProgress(this.hookedTrash ? "trash_collected" : "fish_caught");
+    recordStarterQuestCatch(this.pendingIsTrash ? "trash" : "fish");
+    recordDailyQuestProgress(this.pendingIsTrash ? "trash_collected" : "fish_caught");
     const currentLevel = getAnglerLevel(this.anglerXp, this.collectionCount);
     this.resetBattle();
     if (currentLevel > previousLevel) {
