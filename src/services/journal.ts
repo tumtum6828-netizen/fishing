@@ -1,6 +1,7 @@
 import { FISH_ENVIRONMENT_WEIGHTS, type TimePeriod, type WeatherId } from "../data/environmentData";
 import {
   biomeInsight,
+  HABITAT_COMPLETE_REWARD,
   HABITAT_BIOMES,
   HABITAT_PERIODS,
   HABITAT_WEATHERS,
@@ -126,6 +127,45 @@ export function recordCatch(speciesName: string, cell: HabitatCell): { newCell: 
   const speciesLog: SpeciesLog = { ...log, [speciesName]: entry };
   writeSaveData({ speciesLog });
   return { newCell, progress: getHabitatProgress(speciesName, { ...save, speciesLog }) };
+}
+
+export type HabitatClaimResult = {
+  ok: boolean;
+  message: string;
+  reward?: typeof HABITAT_COMPLETE_REWARD;
+};
+
+export function readClaimedHabitatRewards(save: SaveData = readSaveData()): string[] {
+  return [...new Set(save.claimedHabitatRewards ?? [])];
+}
+
+export function isHabitatRewardClaimed(speciesName: string, save: SaveData = readSaveData()): boolean {
+  return readClaimedHabitatRewards(save).includes(speciesName);
+}
+
+/** เต็มการ์ดแล้วและยังไม่เคยรับ จึงจะกดรับได้ */
+export function canClaimHabitatReward(speciesName: string, save: SaveData = readSaveData()): boolean {
+  return getHabitatProgress(speciesName, save).complete && !isHabitatRewardClaimed(speciesName, save);
+}
+
+/**
+ * รางวัลเมื่อบันทึกครบทุกช่องของชนิดหนึ่ง
+ * กันรับซ้ำด้วยรายชื่อใน `claimedHabitatRewards` ไม่ใช่ด้วยสถานะบนหน้าจอ
+ */
+export function claimHabitatReward(speciesName: string): HabitatClaimResult {
+  const save = readSaveData();
+  if (!getHabitatProgress(speciesName, save).complete) {
+    return { ok: false, message: "ยังบันทึกไม่ครบทุกช่อง" };
+  }
+  const claimed = readClaimedHabitatRewards(save);
+  if (claimed.includes(speciesName)) return { ok: false, message: "รับรางวัลของชนิดนี้ไปแล้ว" };
+  writeSaveData({
+    coins: Math.max(0, save.coins ?? 0) + HABITAT_COMPLETE_REWARD.coins,
+    anglerXp: Math.max(0, save.anglerXp ?? 0) + HABITAT_COMPLETE_REWARD.xp,
+    conservationPoints: Math.max(0, save.conservationPoints ?? 0) + HABITAT_COMPLETE_REWARD.conservationPoints,
+    claimedHabitatRewards: [...claimed, speciesName]
+  });
+  return { ok: true, message: "รับตราสัญลักษณ์นักสำรวจแล้ว", reward: HABITAT_COMPLETE_REWARD };
 }
 
 /**

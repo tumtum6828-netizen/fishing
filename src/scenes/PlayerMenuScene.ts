@@ -3,8 +3,10 @@ import { FISH_PROFILES, RODS, SPECIES_INFO } from "../data/gameData";
 import { FISH_ENVIRONMENT_WEIGHTS, TIME_INFO, WEATHER_INFO } from "../data/environmentData";
 import { BIOME_LABELS, HABITAT_PERIODS, HABITAT_WEATHERS } from "../data/journalData";
 import {
-  cellKey, getHabitatProgress, getSpeciesInsights, getUnlockedInsights, habitatBiomes, readSpeciesLog
+  canClaimHabitatReward, cellKey, claimHabitatReward, getHabitatProgress, getSpeciesInsights,
+  getUnlockedInsights, habitatBiomes, isHabitatRewardClaimed, readSpeciesLog
 } from "../services/journal";
+import { HABITAT_COMPLETE_REWARD } from "../data/journalData";
 import { FISH_ART, getFishArt } from "../data/fishArt";
 import { SPECIES_EDUCATION } from "../data/speciesEducation";
 import { getAnglerLevel } from "../data/questData";
@@ -60,6 +62,7 @@ export class PlayerMenuScene extends Phaser.Scene {
   private dexDetailLayer?: Phaser.GameObjects.Container;
   private selectedBagKey?: string;
   private bagDetailFlipped = false;
+  private dexRecordWeight = 0;
   private characterGender?: CharacterGender;
   private readonly cream = GAME_THEME.cream;
   private readonly ink = GAME_THEME.ink;
@@ -621,10 +624,7 @@ export class PlayerMenuScene extends Phaser.Scene {
       fontFamily: THAI_FONT, fontSize: "20px", fontStyle: "bold",
       color: progress.complete ? "#2f7d54" : this.ink
     });
-    this.add.text(1152, 240, progress.complete ? "✓ ครบทุกช่องแล้ว" : "ออกตกในเวลาและอากาศต่างกันเพื่อเก็บช่องให้ครบ", {
-      fontFamily: THAI_FONT, fontSize: "13px", fontStyle: progress.complete ? "bold" : "normal",
-      color: progress.complete ? "#2f7d54" : "#8e8679"
-    }).setOrigin(1, .5);
+    this.drawHabitatReward(name, progress.complete);
 
     const cellWidth = 74;
     const cellHeight = 38;
@@ -687,7 +687,34 @@ export class PlayerMenuScene extends Phaser.Scene {
     });
   }
 
+  /** สถานะรางวัลของการ์ดนิเวศ: ยังไม่ครบ / กดรับได้ / รับไปแล้ว */
+  private drawHabitatReward(name: string, complete: boolean): void {
+    if (!complete) {
+      this.add.text(1152, 240, "ออกตกในเวลาและอากาศต่างกันเพื่อเก็บช่องให้ครบ", {
+        fontFamily: THAI_FONT, fontSize: "13px", color: "#8e8679"
+      }).setOrigin(1, .5);
+      return;
+    }
+    if (isHabitatRewardClaimed(name)) {
+      this.add.text(1152, 240, "🏅 ครบทุกช่องแล้ว • รับตราสัญลักษณ์ไปแล้ว", {
+        fontFamily: THAI_FONT, fontSize: "13px", fontStyle: "bold", color: "#2f7d54"
+      }).setOrigin(1, .5);
+      return;
+    }
+    const reward = HABITAT_COMPLETE_REWARD;
+    addRoundedPanel(this, 900, 224, 252, 46, this.orange, GAME_THEME.orangeDark, 16, 1, 1.5);
+    this.add.text(1026, 247, `🏅 รับรางวัล  🪙 ${reward.coins}  ♻ ${reward.conservationPoints}  EXP ${reward.xp}`, {
+      fontFamily: THAI_FONT, fontSize: "13px", fontStyle: "bold", color: this.ink
+    }).setOrigin(.5);
+    addPillHitArea(this, 900, 224, 252, 46, () => {
+      const result = claimHabitatReward(name);
+      if (!result.ok) return;
+      this.showDexSpeciesDetails(name, this.dexRecordWeight, "habitat");
+    });
+  }
+
   private showDexSpeciesDetails(name: string, recordWeight: number, tab: DexTab = "info"): void {
+    this.dexRecordWeight = recordWeight;
     const education = SPECIES_EDUCATION[name];
     if (!education) return;
     this.dexDetailLayer?.destroy(true);

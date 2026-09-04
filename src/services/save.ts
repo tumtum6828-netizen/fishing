@@ -53,6 +53,7 @@ export type SaveData = {
   character?: CharacterSelection;
   equippedFashion?: EquippedFashion;
   speciesLog?: SpeciesLog;
+  claimedHabitatRewards?: string[];
 };
 
 const PLAYER_SAVE_KEY = "aquatic-adventure-save-v1";
@@ -176,7 +177,8 @@ export function sanitizeSaveData(raw: unknown): SaveData {
     "rodUpgradeLevels", "selectedBaitId", "baitStock", "activePotionId", "activePotionUsesRemaining",
     "ownedShopItems", "records", "discoveredSpecies", "quests", "starterPackClaimed", "anglerXp",
     "claimedLevelRewards", "unlockedShopItems", "inventory", "worldDay", "worldMinutes", "weather",
-    "aquarium", "breeding", "battle", "dailyQuests", "market", "character", "equippedFashion", "speciesLog"
+    "aquarium", "breeding", "battle", "dailyQuests", "market", "character", "equippedFashion", "speciesLog",
+    "claimedHabitatRewards"
   ]);
   const passthrough: Record<string, unknown> = {};
   Object.entries(raw).forEach(([key, value]) => {
@@ -215,7 +217,8 @@ export function sanitizeSaveData(raw: unknown): SaveData {
     market: objectOnly<MarketData>(raw.market),
     character: objectOnly<CharacterSelection>(raw.character),
     equippedFashion: objectOnly<EquippedFashion>(raw.equippedFashion),
-    speciesLog: recordOf(raw.speciesLog, speciesLogEntry)
+    speciesLog: recordOf(raw.speciesLog, speciesLogEntry),
+    claimedHabitatRewards: arrayOf(raw.claimedHabitatRewards, str)
   };
 
   // ตัดคีย์ที่เป็น undefined ออก เพื่อให้ `save.field ?? ค่าเริ่มต้น` ทำงานเหมือนเดิมทุกจุดที่เรียกใช้
