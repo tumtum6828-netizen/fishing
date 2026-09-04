@@ -1,0 +1,75 @@
+@font-face {
+  font-family: "Mitr";
+  src: url("/assets/fonts/Mitr-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Mitr";
+  src: url("/assets/fonts/Mitr-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Mitr";
+  src: url("/assets/fonts/Mitr-SemiBold.ttf") format("truetype");
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  font-family: "Mitr", "Noto Sans Thai", Tahoma, system-ui, sans-serif;
+  color: #173849;
+  background: #082c3b;
+  font-synthesis: none;
+  touch-action: none;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #game-shell, #game {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: linear-gradient(180deg, #13566f, #082c3b);
+  overscroll-behavior: none;
+}
+
+canvas {
+  display: block;
+  margin: auto;
+  touch-action: none;
+}
+
+#rotate-message {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  color: #fff8dc;
+  background: linear-gradient(180deg, #0e708b, #073449);
+  text-align: center;
+  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+}
+
+.rotate-icon { font-size: 64px; }
+#rotate-message strong { font-size: 22px; }
+#rotate-message span:last-child { opacity: .8; }
+
+@media (orientation: portrait) and (max-width: 900px) and (pointer: coarse) {
+  #rotate-message { display: flex; }
+}

@@ -1,0 +1,18 @@
+# ติดตั้งใหม่ได้จาก package-lock.json
+node_modules/
+
+# ผลลัพธ์จากการ build สร้างใหม่ได้ด้วย npm run build
+dist/
+
+# ไฟล์ชั่วคราวและของจากเครื่องมือภายนอก
+tmp/
+.codex-remote-attachments/
+
+# ค่าเฉพาะเครื่องของ Vite และ editor
+.vite/
+*.local
+.DS_Store
+Thumbs.db
+
+# ตั้งค่าส่วนตัวของ Claude Code (launch.json ยังขึ้น git เพราะทีมใช้ร่วมกัน)
+.claude/settings.local.json
