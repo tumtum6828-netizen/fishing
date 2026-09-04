@@ -1,6 +1,10 @@
 import Phaser from "phaser";
 import { FISH_PROFILES, RODS, SPECIES_INFO } from "../data/gameData";
-import { FISH_ENVIRONMENT_WEIGHTS } from "../data/environmentData";
+import { FISH_ENVIRONMENT_WEIGHTS, TIME_INFO, WEATHER_INFO } from "../data/environmentData";
+import { BIOME_LABELS, HABITAT_PERIODS, HABITAT_WEATHERS } from "../data/journalData";
+import {
+  cellKey, getHabitatProgress, getSpeciesInsights, getUnlockedInsights, habitatBiomes, readSpeciesLog
+} from "../services/journal";
 import { FISH_ART, getFishArt } from "../data/fishArt";
 import { SPECIES_EDUCATION } from "../data/speciesEducation";
 import { getAnglerLevel } from "../data/questData";
@@ -18,6 +22,7 @@ import { readEquippedFashion } from "../services/fashion";
 import { createAvatarLayerSet, preloadAvatarAssets } from "../ui/avatarRenderer";
 
 type MenuPage = "bag" | "character" | "dex" | "settings";
+type DexTab = "info" | "habitat";
 type BagCategory = "all" | "fashion" | "potion" | "fish" | "trash";
 type BagItem = { name: string; kind: "fish"; stack: FishInventoryStack }
   | { name: string; kind: "trash"; count: number }
@@ -599,7 +604,90 @@ export class PlayerMenuScene extends Phaser.Scene {
     });
   }
 
-  private showDexSpeciesDetails(name: string, recordWeight: number): void {
+  /**
+   * ตารางนิเวศจากข้อมูลจริงใน speciesLog
+   * แสดงเฉพาะว่าเคยพบที่ไหน/เวลาใด/อากาศใด ไม่แสดงค่าความน่าจะเป็นหรือตัวคูณ
+   */
+  private drawHabitatTab(name: string): void {
+    const progress = getHabitatProgress(name);
+    const found = new Set(readSpeciesLog()[name]?.cells ?? []);
+    const biomes = habitatBiomes(name);
+
+    addRoundedPanel(this, 285, 216, 890, 62, 0xfffbf1, 0xe3d7bd, 18, 1, 1);
+    this.add.text(308, 232, "บันทึกภาคสนาม", {
+      fontFamily: THAI_FONT, fontSize: "13px", color: "#8e8679"
+    });
+    this.add.text(308, 250, `ค้นพบแล้ว ${progress.found} / ${progress.total} ช่อง`, {
+      fontFamily: THAI_FONT, fontSize: "20px", fontStyle: "bold",
+      color: progress.complete ? "#2f7d54" : this.ink
+    });
+    this.add.text(1152, 240, progress.complete ? "✓ ครบทุกช่องแล้ว" : "ออกตกในเวลาและอากาศต่างกันเพื่อเก็บช่องให้ครบ", {
+      fontFamily: THAI_FONT, fontSize: "13px", fontStyle: progress.complete ? "bold" : "normal",
+      color: progress.complete ? "#2f7d54" : "#8e8679"
+    }).setOrigin(1, .5);
+
+    const cellWidth = 74;
+    const cellHeight = 38;
+    const gap = 7;
+    const labelWidth = 84;
+    const tableWidth = labelWidth + HABITAT_PERIODS.length * (cellWidth + gap);
+    biomes.forEach((biome, biomeIndex) => {
+      const left = 300 + biomeIndex * (tableWidth + 46);
+      const top = 306;
+      this.add.text(left, top - 26, BIOME_LABELS[biome], {
+        fontFamily: THAI_FONT, fontSize: "17px", fontStyle: "bold", color: this.ink
+      });
+      HABITAT_PERIODS.forEach((period, column) => {
+        this.add.text(left + labelWidth + column * (cellWidth + gap) + cellWidth / 2, top + 8,
+          TIME_INFO[period].label, {
+            fontFamily: THAI_FONT, fontSize: "12px", fontStyle: "bold", color: "#8e8679"
+          }).setOrigin(.5);
+      });
+      HABITAT_WEATHERS.forEach((weather, row) => {
+        const y = top + 26 + row * (cellHeight + gap);
+        this.add.text(left + labelWidth - 8, y + cellHeight / 2,
+          `${WEATHER_INFO[weather].icon} ${WEATHER_INFO[weather].label}`, {
+            fontFamily: THAI_FONT, fontSize: "12px", color: "#6f685e"
+          }).setOrigin(1, .5);
+        HABITAT_PERIODS.forEach((period, column) => {
+          const x = left + labelWidth + column * (cellWidth + gap);
+          const seen = found.has(cellKey({ biome, period, weather }));
+          addRoundedPanel(this, x, y, cellWidth, cellHeight,
+            seen ? GAME_THEME.teal : 0xe6e0d2, seen ? 0x1c7f7b : 0xcdc5b4, 10, 1, seen ? 1.6 : 1);
+          this.add.text(x + cellWidth / 2, y + cellHeight / 2, seen ? "✓" : "—", {
+            fontFamily: THAI_FONT, fontSize: seen ? "17px" : "15px", fontStyle: "bold",
+            color: seen ? "#ffffff" : "#a49b8a"
+          }).setOrigin(.5);
+        });
+      });
+    });
+
+    const legendY = 306 + 26 + HABITAT_WEATHERS.length * (cellHeight + gap) + 10;
+    ([[GAME_THEME.teal, "เคยพบแล้ว"], [0xe6e0d2, "ยังไม่เคยพบ"]] as const).forEach(([color, label], index) => {
+      const x = 302 + index * 132;
+      addRoundedPanel(this, x, legendY, 20, 16, color, 0xcdc5b4, 6, 1, 1);
+      this.add.text(x + 28, legendY + 8, label, {
+        fontFamily: THAI_FONT, fontSize: "12px", color: "#6f685e"
+      }).setOrigin(0, .5);
+    });
+
+    const unlocked = getUnlockedInsights(name);
+    const nextInsight = getSpeciesInsights(name).find(insight => insight.requiredCells > progress.found);
+    addRoundedPanel(this, 285, 506, 890, 126, GAME_THEME.paleGreen, 0xc4d9c5, 18, 1, 1);
+    this.add.text(308, 520, "นิสัยที่บันทึกได้", {
+      fontFamily: THAI_FONT, fontSize: "13px", color: "#4d6659"
+    });
+    const lines = unlocked.map(insight => `•  ${insight.text}`);
+    if (nextInsight) {
+      lines.push(`🔒  ค้นพบอีก ${nextInsight.requiredCells - progress.found} ช่องเพื่อปลดล็อกนิสัยข้อถัดไป`);
+    }
+    this.add.text(308, 542, lines.length > 0 ? lines.join("\n") : "ยังไม่มีข้อมูลพอ ออกไปตกเพื่อจดบันทึกเพิ่ม", {
+      fontFamily: THAI_FONT, fontSize: "14px", fontStyle: "bold", color: "#3f5c4c",
+      lineSpacing: 4, wordWrap: { width: 840 }
+    });
+  }
+
+  private showDexSpeciesDetails(name: string, recordWeight: number, tab: DexTab = "info"): void {
     const education = SPECIES_EDUCATION[name];
     if (!education) return;
     this.dexDetailLayer?.destroy(true);
@@ -640,33 +728,51 @@ export class PlayerMenuScene extends Phaser.Scene {
       fontFamily: THAI_FONT, fontSize: "22px", fontStyle: "bold", color: "#8a5a28"
     }).setOrigin(.5);
 
-    addRoundedPanel(this, 285, 220, 430, 265, 0xf1eadc, 0xddcda9, 20, 1, 1.2);
-    this.createCoverImage(500, 350, education.imageKey, 402, 237);
-    this.add.text(500, 504, `ภาพ: ${education.imageCredit}`, {
-      fontFamily: THAI_FONT, fontSize: "10.5px", color: "#8e8679", align: "center"
-    }).setOrigin(.5);
+    ([["info", "ข้อมูล"], ["habitat", "ตารางนิเวศ"]] as const).forEach(([id, label], index) => {
+      const width = 128;
+      const x = 913 + index * (width + 10);
+      const active = id === tab;
+      addRoundedPanel(this, x, 150, width, 42,
+        active ? GAME_THEME.teal : 0xfffdf7, active ? GAME_THEME.teal : GAME_THEME.line, 15, 1, active ? 2 : 1.2);
+      this.add.text(x + width / 2, 171, label, {
+        fontFamily: THAI_FONT, fontSize: "15px", fontStyle: "bold",
+        color: active ? "#ffffff" : this.ink
+      }).setOrigin(.5);
+      if (active) return;
+      addPillHitArea(this, x, 150, width, 42, () => this.showDexSpeciesDetails(name, recordWeight, id));
+    });
 
-    addRoundedPanel(this, 742, 220, 433, 300, 0xfffbf1, 0xe3d7bd, 20, 1, 1);
-    this.add.text(770, 242,
-      `ลักษณะเด่น\n${education.appearance}\n\n`+
-      `ถิ่นอาศัย\n${education.habitat}\n\n`+
-      `อาหาร\n${education.diet}`,
-      {
-        fontFamily: THAI_FONT, fontSize: "14px", fontStyle: "bold", color: this.ink,
-        lineSpacing: 2, wordWrap: { width: 377 }
-      }
-    );
+    if (tab === "info") {
+      addRoundedPanel(this, 285, 220, 430, 265, 0xf1eadc, 0xddcda9, 20, 1, 1.2);
+      this.createCoverImage(500, 350, education.imageKey, 402, 237);
+      this.add.text(500, 504, `ภาพ: ${education.imageCredit}`, {
+        fontFamily: THAI_FONT, fontSize: "10.5px", color: "#8e8679", align: "center"
+      }).setOrigin(.5);
 
-    addRoundedPanel(this, 330, 535, 845, 96, GAME_THEME.paleGreen, 0xc4d9c5, 20, 1, 1);
-    this.add.text(356, 551,
-      `ขนาดที่พบบ่อย  ${education.commonSize}     •     สถานะ  ${education.conservationStatus}\n`+
-      `เกร็ดน่ารู้  ${education.fieldNote}\n`+
-      `สถิติของคุณ  ตัวใหญ่สุด ${recordWeight.toFixed(2)} กก.     •     ${education.sourceLabel}`,
-      {
-        fontFamily: THAI_FONT, fontSize: "14px", color: "#4d6659", lineSpacing: 5,
-        wordWrap: { width: 790 }
-      }
-    );
+      addRoundedPanel(this, 742, 220, 433, 300, 0xfffbf1, 0xe3d7bd, 20, 1, 1);
+      this.add.text(770, 242,
+        `ลักษณะเด่น\n${education.appearance}\n\n`+
+        `ถิ่นอาศัย\n${education.habitat}\n\n`+
+        `อาหาร\n${education.diet}`,
+        {
+          fontFamily: THAI_FONT, fontSize: "14px", fontStyle: "bold", color: this.ink,
+          lineSpacing: 2, wordWrap: { width: 377 }
+        }
+      );
+
+      addRoundedPanel(this, 330, 535, 845, 96, GAME_THEME.paleGreen, 0xc4d9c5, 20, 1, 1);
+      this.add.text(356, 551,
+        `ขนาดที่พบบ่อย  ${education.commonSize}     •     สถานะ  ${education.conservationStatus}\n`+
+        `เกร็ดน่ารู้  ${education.fieldNote}\n`+
+        `สถิติของคุณ  ตัวใหญ่สุด ${recordWeight.toFixed(2)} กก.     •     ${education.sourceLabel}`,
+        {
+          fontFamily: THAI_FONT, fontSize: "14px", color: "#4d6659", lineSpacing: 5,
+          wordWrap: { width: 790 }
+        }
+      );
+    } else {
+      this.drawHabitatTab(name);
+    }
 
     const detailObjects = this.children.list.filter(gameObject => !existingObjects.has(gameObject));
     this.dexDetailLayer = this.add.container(0, 0, detailObjects).setAlpha(0);
