@@ -40,6 +40,7 @@ import { seedPrototypeTestData } from "./services/testData";
 import { migrateSpeciesLog, recordCatch } from "./services/journal";
 import type { HabitatCell } from "./types/journal";
 import { preloadRodArt, ROD_FIRST_PERSON_ART } from "./data/rodArt";
+import { resetQuestBoardDismissal } from "./ui/worldHud";
 
 type BattleState = "ready" | "casting" | "waiting" | "hooking" | "fighting" | "caught" | "escaped";
 type FishPhase = "burst" | "rest" | "turn";
@@ -1639,6 +1640,7 @@ class FishingScene extends Phaser.Scene {
   }
 }
 
+resetQuestBoardDismissal();
 adoptPlayerSaveForDevTest();
 seedPrototypeTestData();
 migrateSpeciesLog();

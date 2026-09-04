@@ -18,10 +18,23 @@ import { readEquippedFashion } from "../services/fashion";
 import { createAvatarLayerSet, preloadAvatarAssets } from "../ui/avatarRenderer";
 
 type MenuPage = "bag" | "character" | "dex" | "settings";
-type BagCategory = "all" | "fish" | "trash" | "fashion";
+type BagCategory = "all" | "fashion" | "potion" | "fish" | "trash";
 type BagItem = { name: string; kind: "fish"; stack: FishInventoryStack }
   | { name: string; kind: "trash"; count: number }
-  | { name: string; kind: "fashion"; count: number; icon: string };
+  | { name: string; kind: "fashion"; count: number; icon: string }
+  | { name: string; kind: "potion"; count: number; icon: string; description: string };
+
+// ตารางของในกระเป๋า: 3 ชิ้นต่อแถว 4 แถวที่มองเห็น เกินกว่านั้นเลื่อนดูได้
+const BAG_COLS = 3;
+const BAG_ROWS = 4;
+const BAG_CARD_WIDTH = 176;
+const BAG_CARD_HEIGHT = 98;
+const BAG_COL_STEP = 200;
+const BAG_ROW_STEP = 110;
+const BAG_LEFT = 245;
+const BAG_TOP = 189;
+const BAG_VIEW_WIDTH = BAG_COL_STEP * (BAG_COLS - 1) + BAG_CARD_WIDTH;
+const BAG_VIEW_HEIGHT = BAG_ROW_STEP * (BAG_ROWS - 1) + BAG_CARD_HEIGHT;
 
 const PAGE_LABELS: Record<MenuPage, { icon: string; label: string; title: string }> = {
   bag: { icon: "🎒", label: "กระเป๋า", title: "กระเป๋า" },
@@ -34,6 +47,10 @@ export class PlayerMenuScene extends Phaser.Scene {
   private page: MenuPage = "bag";
   private bagCategory: BagCategory = "all";
   private bagLayer?: Phaser.GameObjects.Container;
+  private bagGrid?: Phaser.GameObjects.Container;
+  private bagScrollY = 0;
+  private bagMaxScroll = 0;
+  private bagScrollThumb?: () => void;
   private bagDetailCard?: Phaser.GameObjects.Container;
   private dexDetailLayer?: Phaser.GameObjects.Container;
   private selectedBagKey?: string;
@@ -67,6 +84,7 @@ export class PlayerMenuScene extends Phaser.Scene {
   create(): void {
     drawSoftBackdrop(this);
     this.drawShell();
+    this.setupBagScroll();
     if (this.page === "bag") this.drawBag();
     else if (this.page === "character") this.drawCharacter();
     else if (this.page === "dex") this.drawDex();
@@ -102,13 +120,17 @@ export class PlayerMenuScene extends Phaser.Scene {
   private drawBag(): void {
     this.bagLayer?.destroy(true);
     this.bagLayer = undefined;
+    this.bagGrid = undefined;
+    this.bagScrollThumb = undefined;
+    this.bagMaxScroll = 0;
     const existingObjects = new Set(this.children.list);
     const inventory = readInventory();
     const fishValue = getInventoryFishValue(inventory);
     this.drawBagTab(230, 135, "ทั้งหมด", "all");
-    this.drawBagTab(375, 110, "สัตว์น้ำ", "fish");
-    this.drawBagTab(495, 110, "ขยะ", "trash");
-    this.drawBagTab(615, 110, "ชุด", "fashion");
+    this.drawBagTab(375, 100, "ชุด", "fashion");
+    this.drawBagTab(485, 90, "ยา", "potion");
+    this.drawBagTab(585, 110, "สัตว์น้ำ", "fish");
+    this.drawBagTab(705, 90, "ขยะ", "trash");
     addRoundedPanel(this, 974, 126, 220, 54, fishValue > 0 ? this.orange : GAME_THEME.mutedFill,
       fishValue > 0 ? GAME_THEME.orangeDark : 0xbab2a5, 20, 1, 1.5);
     this.add.text(1090, 153, fishValue > 0 ? "🧺 เปิดตลาดปลา" : "ไม่มีสัตว์น้ำให้ขาย", {
@@ -131,6 +153,15 @@ export class PlayerMenuScene extends Phaser.Scene {
           count: save.ownedShopItems?.[item.id] ?? 0,
           icon: item.icon
         }))
+        .filter(item => item.count > 0),
+      ...SHOP_ITEMS.filter(item => item.category === "potion")
+        .map(item => ({
+          name: item.name,
+          kind: "potion" as const,
+          count: save.ownedShopItems?.[item.id] ?? 0,
+          icon: item.icon,
+          description: item.description
+        }))
         .filter(item => item.count > 0)
     ];
     const items = this.bagCategory === "all"
@@ -140,7 +171,8 @@ export class PlayerMenuScene extends Phaser.Scene {
       const emptyMessage = this.bagCategory === "fish" ? "ยังไม่มีสัตว์น้ำในกระเป๋า\nเลือกเก็บหลังตกสำเร็จ"
         : this.bagCategory === "trash" ? "ยังไม่มีขยะในกระเป๋า\nขยะมีโอกาสติดเบ็ดขึ้นมา"
           : this.bagCategory === "fashion" ? "ยังไม่มีชุด\nซื้อเครื่องแต่งกายได้ที่ร้านลุงมนัส"
-            : "กระเป๋ายังว่าง\nออกตกปลาเพื่อเก็บสิ่งของ";
+            : this.bagCategory === "potion" ? "ยังไม่มียา\nซื้อยาช่วยตกปลาได้ที่ร้านลุงมนัส"
+              : "กระเป๋ายังว่าง\nออกตกปลาเพื่อเก็บสิ่งของ";
       this.add.text(700, 370, emptyMessage, {
         fontFamily: THAI_FONT, fontSize: "25px", color: "#8e887d", align: "center", lineSpacing: 10
       }).setOrigin(.5);
@@ -152,15 +184,20 @@ export class PlayerMenuScene extends Phaser.Scene {
       this.selectedBagKey = bagKey(items[0]);
       this.bagDetailFlipped = false;
     }
+    const beforeGrid = new Set(this.children.list);
+    const halfWidth = BAG_CARD_WIDTH / 2;
+    const halfHeight = BAG_CARD_HEIGHT / 2;
     items.forEach((item, index) => {
-      const col = index % 4;
-      const row = Math.floor(index / 4);
-      const x = 311 + col * 154;
-      const y = 238 + row * 110;
+      const col = index % BAG_COLS;
+      const row = Math.floor(index / BAG_COLS);
+      const x = BAG_LEFT + halfWidth + col * BAG_COL_STEP;
+      const y = BAG_TOP + halfHeight + row * BAG_ROW_STEP;
       const selected = bagKey(item) === this.selectedBagKey;
-      addRoundedPanel(this, x - 66, y - 49, 132, 98, selected ? 0xfff1d4 : 0xffffff,
+      addRoundedPanel(this, x - halfWidth, y - halfHeight, BAG_CARD_WIDTH, BAG_CARD_HEIGHT, selected ? 0xfff1d4 : 0xffffff,
         selected ? GAME_THEME.orangeDark
-          : item.kind === "fish" ? 0x82909c : item.kind === "trash" ? 0x5a9f79 : 0xc58a55,
+          : item.kind === "fish" ? 0x82909c
+            : item.kind === "trash" ? 0x5a9f79
+              : item.kind === "potion" ? 0x8f7bc0 : 0xc58a55,
         17, 1, selected ? 2.5 : 1.5);
       if (item.kind === "fish") this.drawFishIcon(x, y - 17, item.name, false, .52);
       else if (item.kind === "trash") this.add.text(x, y - 17, "♻", { fontSize: "34px" }).setOrigin(.5);
@@ -170,17 +207,18 @@ export class PlayerMenuScene extends Phaser.Scene {
         fontFamily: THAI_FONT, fontSize: "12px", fontStyle: "bold", color: this.ink, align: "center",
         wordWrap: { width: 120 }
       }).setOrigin(.5);
-      this.add.circle(x + 48, y - 34, 13, 0x4e514a, .92);
-      this.add.text(x + 48, y - 34, `×${quantity}`, {
+      this.add.circle(x + halfWidth - 18, y - 34, 13, 0x4e514a, .92);
+      this.add.text(x + halfWidth - 18, y - 34, `×${quantity}`, {
         fontFamily: THAI_FONT, fontSize: "10px", fontStyle: "bold", color: "#fff9e7"
       }).setOrigin(.5);
-      addPillHitArea(this, x - 66, y - 49, 132, 98, () => {
+      addPillHitArea(this, x - halfWidth, y - halfHeight, BAG_CARD_WIDTH, BAG_CARD_HEIGHT, () => {
         if (this.selectedBagKey === bagKey(item)) return;
         this.selectedBagKey = bagKey(item);
         this.bagDetailFlipped = false;
         this.drawBag();
       });
     });
+    this.buildBagGrid(beforeGrid, items.length);
     const selectedItem = items.find(item => bagKey(item) === this.selectedBagKey) ?? items[0];
     this.bagDetailCard = this.createBagDetailCard(selectedItem);
     this.commitBagLayer(existingObjects);
@@ -259,6 +297,10 @@ export class PlayerMenuScene extends Phaser.Scene {
         children.push(this.add.text(0, -132, "♻", { fontSize: "66px" }).setOrigin(.5));
         count.setText(`เก็บไว้ ${item.count} ชิ้น`);
         stats.setText("ขยะที่นำขึ้นจากแหล่งน้ำ\nเก็บไว้สำหรับภารกิจและระบบแลกของ");
+      } else if (item.kind === "potion") {
+        children.push(this.add.text(0, -132, item.icon, { fontSize: "66px" }).setOrigin(.5));
+        count.setText(`มีแล้ว ${item.count} ขวด`);
+        stats.setText(`${item.description}\nเลือกใช้ได้จากปุ่มยาในหน้าตกปลา`);
       } else {
         children.push(this.add.text(0, -132, item.icon, { fontSize: "66px" }).setOrigin(.5));
         count.setText(`มีแล้ว ${item.count} ชิ้น`);
@@ -650,10 +692,81 @@ export class PlayerMenuScene extends Phaser.Scene {
     addPillHitArea(this, x, 126, width, 54, () => {
       if (this.bagCategory === category) return;
       this.bagCategory = category;
+      this.bagScrollY = 0;
       this.selectedBagKey = undefined;
       this.bagDetailFlipped = false;
       this.drawBag();
     });
+  }
+
+  /** ย้ายการ์ดทั้งหมดเข้าคอนเทนเนอร์ที่ถูก mask ไว้ แล้วเปิดให้เลื่อนเมื่อของเกินสี่แถว */
+  private buildBagGrid(beforeGrid: Set<Phaser.GameObjects.GameObject>, itemCount: number): void {
+    const cards = this.children.list.filter(gameObject => !beforeGrid.has(gameObject));
+    this.bagGrid = this.add.container(0, 0, cards);
+
+    const shape = this.make.graphics({ x: 0, y: 0 });
+    shape.fillStyle(0xffffff).fillRect(BAG_LEFT, BAG_TOP, BAG_VIEW_WIDTH, BAG_VIEW_HEIGHT);
+    this.bagGrid.setMask(shape.createGeometryMask());
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => shape.destroy());
+
+    const rows = Math.ceil(itemCount / BAG_COLS);
+    const contentHeight = rows > 0 ? (rows - 1) * BAG_ROW_STEP + BAG_CARD_HEIGHT : 0;
+    this.bagMaxScroll = Math.max(0, contentHeight - BAG_VIEW_HEIGHT);
+    this.setBagScroll(this.bagScrollY);
+    if (this.bagMaxScroll <= 0) return;
+
+    const trackX = BAG_LEFT + BAG_VIEW_WIDTH + 10;
+    const track = this.add.graphics();
+    track.fillStyle(0xe4dccb, .95).fillRoundedRect(trackX, BAG_TOP, 10, BAG_VIEW_HEIGHT, 5);
+    const thumbHeight = Math.max(46, BAG_VIEW_HEIGHT * (BAG_VIEW_HEIGHT / contentHeight));
+    const thumb = this.add.graphics();
+    const drawThumb = (): void => {
+      const progress = this.bagMaxScroll > 0 ? -this.bagScrollY / this.bagMaxScroll : 0;
+      const thumbY = BAG_TOP + progress * (BAG_VIEW_HEIGHT - thumbHeight);
+      thumb.clear().fillStyle(0xb08a4a, 1).fillRoundedRect(trackX, thumbY, 10, thumbHeight, 5);
+    };
+    drawThumb();
+    this.bagScrollThumb = drawThumb;
+  }
+
+  private setBagScroll(value: number): void {
+    this.bagScrollY = Phaser.Math.Clamp(value, -this.bagMaxScroll, 0);
+    this.bagGrid?.setY(this.bagScrollY);
+    // mask บังแค่ภาพ ไม่ได้บัง input ถ้าไม่ปิดรับคลิกให้การ์ดที่เลื่อนพ้นกรอบ
+    // มันจะลอยไปทับแถบแท็บด้านบนแล้วกินคลิกแทน
+    this.bagGrid?.list.forEach(child => {
+      const zone = child as Phaser.GameObjects.Zone;
+      if (!zone.input) return;
+      const top = zone.y + this.bagScrollY;
+      zone.input.enabled = top >= BAG_TOP && top + BAG_CARD_HEIGHT <= BAG_TOP + BAG_VIEW_HEIGHT;
+    });
+    this.bagScrollThumb?.();
+  }
+
+  /** ผูกครั้งเดียวตอนสร้างฉาก ไม่ผูกซ้ำทุกครั้งที่วาดกระเป๋าใหม่ */
+  private setupBagScroll(): void {
+    const insideGrid = (pointer: Phaser.Input.Pointer): boolean =>
+      pointer.x >= BAG_LEFT && pointer.x <= BAG_LEFT + BAG_VIEW_WIDTH
+      && pointer.y >= BAG_TOP && pointer.y <= BAG_TOP + BAG_VIEW_HEIGHT;
+
+    this.input.on("wheel", (pointer: Phaser.Input.Pointer, _over: unknown, _dx: number, dy: number) => {
+      if (this.page !== "bag" || this.bagMaxScroll <= 0 || !insideGrid(pointer)) return;
+      this.setBagScroll(this.bagScrollY - dy * .6);
+    });
+
+    let dragging = false;
+    let lastPointerY = 0;
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      if (this.page !== "bag" || this.bagMaxScroll <= 0 || !insideGrid(pointer)) return;
+      dragging = true;
+      lastPointerY = pointer.y;
+    });
+    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      if (!dragging) return;
+      this.setBagScroll(this.bagScrollY + (pointer.y - lastPointerY));
+      lastPointerY = pointer.y;
+    });
+    this.input.on("pointerup", () => { dragging = false; });
   }
 
   private commitBagLayer(existingObjects: Set<Phaser.GameObjects.GameObject>): void {

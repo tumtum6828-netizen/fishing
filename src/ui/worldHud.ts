@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { getBreedingRemainingMinutes, readBreeding } from "../services/breeding";
 import { getDailyQuestSummary } from "../services/dailyQuests";
-import { getStarterQuestSummary } from "../services/quests";
+import { getStarterQuestSummary, readStarterQuest } from "../services/quests";
 import { getAnglerLevel } from "../data/questData";
 import { readSaveData } from "../services/save";
 import { readCharacterSelection, getSelectedCharacter } from "../services/character";
@@ -220,10 +220,29 @@ export function createFishingActionButton(
   return { container, label };
 }
 
+/**
+ * จำว่าผู้เล่นปิดกระดานภารกิจไปแล้วหรือยัง
+ * เก็บไว้ระดับโมดูล ไม่ลงเซฟ จึงคงอยู่ข้ามฉากภายในรอบเล่นเดียวกัน
+ * และรีเซ็ตเองเมื่อเข้าเกมใหม่ ตรงกับที่ต้องการว่า "ล็อกอินเข้ามาใหม่ให้เปิด"
+ */
+let questBoardDismissed = false;
+let questBoardDismissedWhileReady = false;
+
+/** เรียกเมื่อเริ่มเกมใหม่ เพื่อให้กระดานกลับมาแสดงเสมอ */
+export function resetQuestBoardDismissal(): void {
+  questBoardDismissed = false;
+  questBoardDismissedWhileReady = false;
+}
+
 export function createDailyQuestButton(scene: Phaser.Scene, returnScene: string): Phaser.GameObjects.Container {
   const summary = getDailyQuestSummary();
-  const ready = summary.includes("รอรับ");
   const save = readSaveData();
+  // มีรางวัลรอรับ นับทั้งภารกิจรายวันและภารกิจเริ่มต้นที่พร้อมส่ง
+  const ready = summary.includes("รอรับ") || readStarterQuest(save).status === "ready";
+  // ปิดไปตอนยังไม่มีรางวัล แล้วมีรางวัลโผล่มาทีหลัง ให้กลับมาแสดงเอง
+  if (questBoardDismissed && ready && !questBoardDismissedWhileReady) {
+    questBoardDismissed = false;
+  }
   const board = scene.add.image(0, 0, "quest-board-v1").setDisplaySize(230, 315);
   const title = scene.add.text(0, -72, ready ? "🎁 ภารกิจพร้อมรับ" : "ภารกิจ", {
     fontFamily: THAI_FONT, fontSize: "17px", fontStyle: "bold", color: "#4b301d"
@@ -245,10 +264,29 @@ export function createDailyQuestButton(scene: Phaser.Scene, returnScene: string)
   }).setOrigin(.5);
   const hitArea = scene.add.rectangle(0, 0, 222, 300, 0xffffff, .001)
     .setInteractive({ useHandCursor: true });
-  const container = scene.add.container(128, 326, [board, title, starter, divider, label, hintBack, hint, hitArea]).setDepth(12);
+  // ปุ่มปิดต้องอยู่หลัง hitArea ในลิสต์ เพราะ Phaser ตรวจ input จากชิ้นบนสุดลงล่าง
+  // ถ้าอยู่ก่อน hitArea จะกลืนคลิกไปเปิดหน้าภารกิจแทน
+  const closeButton = scene.add.circle(88, -118, 14, GAME_THEME.cream, .97)
+    .setStrokeStyle(1.6, 0xb98d4e, 1)
+    .setInteractive({ useHandCursor: true });
+  const closeIcon = scene.add.text(88, -120, "×", {
+    fontFamily: THAI_FONT, fontSize: "21px", fontStyle: "bold", color: "#7a5122"
+  }).setOrigin(.5);
+  const container = scene.add
+    .container(128, 326, [board, title, starter, divider, label, hintBack, hint, hitArea, closeButton, closeIcon])
+    .setDepth(12);
   hitArea.on("pointerdown", () => {
     scene.tweens.add({ targets: container, scale: .96, duration: 70, yoyo: true });
     scene.scene.start("DailyQuestScene", { returnScene });
+  });
+  container.setVisible(!questBoardDismissed);
+  closeButton.on("pointerdown", () => {
+    questBoardDismissed = true;
+    questBoardDismissedWhileReady = ready;
+    scene.tweens.add({
+      targets: container, scale: .82, alpha: 0, duration: 140,
+      onComplete: () => container.setVisible(false).setScale(1).setAlpha(1)
+    });
   });
   return container;
 }
